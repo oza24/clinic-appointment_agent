@@ -13,28 +13,36 @@ SCOPE = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-SHEET = None
 
-try:
-    # 1. Try reading credentials from Render Environment Variable
-    env_creds = os.getenv("GOOGLE_CREDENTIALS_JSON")
+def get_google_sheet():
+    """Helper to authenticate and fetch the sheet object."""
+    try:
+        env_creds = os.getenv("GOOGLE_CREDENTIALS_JSON")
 
-    if env_creds:
-        creds_dict = json.loads(env_creds)
-        CREDS = Credentials.from_service_account_info(
-            creds_dict, scopes=SCOPE
-        )
-    else:
-        # 2. Local fallback if environment variable is not set
-        CREDS = Credentials.from_service_account_file(
-            "credentials.json", scopes=SCOPE
-        )
+        if env_creds:
+            creds_dict = json.loads(env_creds)
+            # Fix escaped newlines in private_key if present
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace(
+                    "\\n", "\n"
+                )
+            creds = Credentials.from_service_account_info(
+                creds_dict, scopes=SCOPE
+            )
+        else:
+            creds = Credentials.from_service_account_file(
+                "credentials.json", scopes=SCOPE
+            )
 
-    GSPREAD_CLIENT = gspread.authorize(CREDS)
-    SHEET = GSPREAD_CLIENT.open("Clinic_Appointments").sheet1
-    print("Successfully connected to Google Sheets!")
-except Exception as e:
-    print(f"Error connecting to Google Sheets: {e}")
+        client = gspread.authorize(creds)
+        return client.open("Clinic_Appointments").sheet1
+    except Exception as e:
+        print(f"Error connecting to Google Sheets: {e}")
+        return None
+
+
+# Global sheet reference
+SHEET = get_google_sheet()
 
 
 # --- DATA SCHEMA ---
@@ -48,17 +56,19 @@ class BookingPayload(BaseModel):
 # --- API ENDPOINT ---
 @app.post("/api/book-appointment")
 async def book_appointment(data: BookingPayload):
+    global SHEET
     if not SHEET:
-        raise HTTPException(
-            status_code=500,
-            detail="Google Sheets connection is not initialized. Check server credentials.",
-        )
+        SHEET = get_google_sheet()
+        if not SHEET:
+            raise HTTPException(
+                status_code=500,
+                detail="Google Sheets connection is not initialized. Check server credentials.",
+            )
 
     try:
-        # Fetch all existing records from the sheet
         records = SHEET.get_all_records()
 
-        # 1. Prevent Double Booking for the same date and time slot
+        # 1. Prevent Double Booking
         for row in records:
             if (
                 str(row.get("Date")) == data.date
@@ -67,17 +77,16 @@ async def book_appointment(data: BookingPayload):
             ):
                 return {
                     "success": False,
-                    "message": f"Sorry, the slot on {data.date} at {data.time} is already booked. Please ask the caller to choose a different time slot.",
+                    "message": f"Sorry, the slot on {data.date} at {data.time} is already booked. Please choose a different time slot.",
                 }
 
-        # 2. Calculate the Daily Token Number
+        # 2. Calculate Daily Token Number
         same_day_bookings = [
             r for r in records if str(r.get("Date")) == data.date
         ]
         token_number = len(same_day_bookings) + 1
 
-        # 3. Append the new appointment row into Google Sheets
-        # Columns: Date | Time | Patient Name | Phone Number | Token Number | Status
+        # 3. Append to Google Sheets
         SHEET.append_row(
             [
                 data.date,
@@ -98,7 +107,7 @@ async def book_appointment(data: BookingPayload):
     except Exception as e:
         print(f"Error executing booking: {e}")
         raise HTTPException(
-            status_code=500 detail=f"Internal Server Error: {str(e)}"
+            status_code=500, detail=f"Internal Server Error: {str(e)}"
         )
 
 
