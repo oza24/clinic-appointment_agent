@@ -3,7 +3,8 @@ import os
 from fastapi import FastAPI, HTTPException
 from google.oauth2.service_account import Credentials
 import gspread
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
 from datetime import datetime
 
 app = FastAPI(title="Clinic Appointment Booking API")
