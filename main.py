@@ -65,6 +65,8 @@ def get_google_sheet():
 # DATA MODEL
 # ============================================================
 
+from pydantic import BaseModel, field_validator
+
 class BookingPayload(BaseModel):
     name: str
     phone: str
@@ -72,13 +74,15 @@ class BookingPayload(BaseModel):
     time: str
 
     @field_validator("phone", mode="before")
+    @classmethod
     def coerce_phone_to_string(cls, v):
-        # Convert integers or floats from Sarvam to clean string
         return str(v).strip()
 
     @field_validator("name", "date", "time", mode="before")
+    @classmethod
     def clean_strings(cls, v):
         return str(v).strip() if v is not None else ""
+
 
 # ============================================================
 # ROOT
