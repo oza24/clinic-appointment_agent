@@ -268,6 +268,14 @@ async def health():
 @app.post("/api/book-appointment")
 async def book_appointment(data: BookingPayload):
 
+    print("================================")
+    print("SARVAM BOOKING REQUEST RECEIVED")
+    print("Name:", data.name)
+    print("Phone:", data.phone)
+    print("Date:", data.date)
+    print("Time:", data.time)
+    print("================================")
+    
     logger.info("======================================")
     logger.info("BOOKING REQUEST RECEIVED")
     logger.info(f"Name: {data.name}")
