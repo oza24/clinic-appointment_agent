@@ -1,152 +1,12 @@
-# import json
-# import os
-# from fastapi import FastAPI, HTTPException
-# from google.oauth2.service_account import Credentials
-# import gspread
-# from pydantic import BaseModel
-
-# app = FastAPI(title="Clinic Appointment Booking Webhook")
-
-# # --- GOOGLE SHEETS SETUP ---
-# SCOPE = [
-#     "https://www.googleapis.com/auth/spreadsheets",
-#     "https://www.googleapis.com/auth/drive",
-# ]
-
-
-# def get_google_sheet():
-#     """Helper to authenticate and fetch the sheet object."""
-#     try:
-#         env_creds = os.getenv("GOOGLE_CREDENTIALS_JSON")
-
-#         if env_creds:
-#             creds_dict = json.loads(env_creds)
-#             # Fix escaped newlines in private_key if present
-#             if "private_key" in creds_dict:
-#                 creds_dict["private_key"] = creds_dict["private_key"].replace(
-#                     "\\n", "\n"
-#                 )
-#             creds = Credentials.from_service_account_info(
-#                 creds_dict, scopes=SCOPE
-#             )
-#         else:
-#             creds = Credentials.from_service_account_file(
-#                 "credentials.json", scopes=SCOPE
-#             )
-
-#         client = gspread.authorize(creds)
-#         return client.open("Clinic_Appointments").sheet1
-#     except Exception as e:
-#         print(f"Error connecting to Google Sheets: {e}")
-#         return None
-
-
-# # Global sheet reference
-# SHEET = get_google_sheet()
-
-
-# # --- DATA SCHEMA ---
-# class BookingPayload(BaseModel):
-#     name: str
-#     phone: str
-#     date: str  # Format: YYYY-MM-DD
-#     time: str  # Format: e.g., "10:00 AM"
-
-
-# # --- API ENDPOINT ---
-# @app.post("/api/book-appointment")
-# async def book_appointment(data: BookingPayload):
-#     global SHEET
-#     if not SHEET:
-#         SHEET = get_google_sheet()
-#         if not SHEET:
-#             raise HTTPException(
-#                 status_code=500,
-#                 detail="Google Sheets connection is not initialized. Check server credentials.",
-#             )
-
-#     try:
-#         records = SHEET.get_all_records()
-
-#         # 1. Prevent Double Booking
-#         for row in records:
-#             if (
-#                 str(row.get("Date")) == data.date
-#                 and str(row.get("Time")).strip().lower()
-#                 == data.time.strip().lower()
-#             ):
-#                 return {
-#                     "success": False,
-#                     "message": f"Sorry, the slot on {data.date} at {data.time} is already booked. Please choose a different time slot.",
-#                 }
-
-#         # 2. Calculate Daily Token Number
-#         same_day_bookings = [
-#             r for r in records if str(r.get("Date")) == data.date
-#         ]
-#         token_number = len(same_day_bookings) + 1
-
-#         # 3. Append to Google Sheets
-#         SHEET.append_row(
-#             [
-#                 data.date,
-#                 data.time,
-#                 data.name,
-#                 data.phone,
-#                 token_number,
-#                 "Confirmed",
-#             ]
-#         )
-
-#         return {
-#             "success": True,
-#             "token_number": token_number,
-#             "message": f"Appointment successfully booked for {data.name} on {data.date} at {data.time}. Assigned queue token number is {token_number}.",
-#         }
-
-#     except Exception as e:
-#         print(f"Error executing booking: {e}")
-#         raise HTTPException(
-#             status_code=500, detail=f"Internal Server Error: {str(e)}"
-#         )
-
-
-# # Health Check Route
-# @app.get("/")
-# async def root():
-#     return {"status": "Backend server is running!"}
-
-
-
-
 import json
 import os
-import logging
-from datetime import datetime
-
-import gspread
 from fastapi import FastAPI, HTTPException
 from google.oauth2.service_account import Credentials
-from pydantic import BaseModel, Field
+import gspread
+from pydantic import BaseModel
+from datetime import datetime
 
-
-# ============================================================
-# APP
-# ============================================================
-
-app = FastAPI(
-    title="Clinic Appointment Booking API",
-    version="1.0.0"
-)
-
-
-# ============================================================
-# LOGGING
-# ============================================================
-
-logging.basicConfig(level=logging.INFO)
-
-logger = logging.getLogger("clinic-booking")
+app = FastAPI(title="Clinic Appointment Booking API")
 
 
 # ============================================================
@@ -160,22 +20,18 @@ SCOPE = [
 
 
 def get_google_sheet():
-    """
-    Connect to Google Sheets and return the first worksheet.
-    """
-
     try:
+        print("[SHEETS] Connecting to Google Sheets...", flush=True)
 
         env_creds = os.getenv("GOOGLE_CREDENTIALS_JSON")
 
         if env_creds:
-
             creds_dict = json.loads(env_creds)
 
             if "private_key" in creds_dict:
-                creds_dict["private_key"] = creds_dict[
-                    "private_key"
-                ].replace("\\n", "\n")
+                creds_dict["private_key"] = (
+                    creds_dict["private_key"].replace("\\n", "\n")
+                )
 
             creds = Credentials.from_service_account_info(
                 creds_dict,
@@ -183,7 +39,6 @@ def get_google_sheet():
             )
 
         else:
-
             creds = Credentials.from_service_account_file(
                 "credentials.json",
                 scopes=SCOPE
@@ -191,58 +46,39 @@ def get_google_sheet():
 
         client = gspread.authorize(creds)
 
-        spreadsheet = client.open("Clinic_Appointments")
+        sheet = client.open("Clinic_Appointments").sheet1
 
-        worksheet = spreadsheet.sheet1
+        print("[SHEETS] Connection successful!", flush=True)
 
-        logger.info("Google Sheets connection successful")
-
-        return worksheet
+        return sheet
 
     except Exception as e:
-
-        logger.exception(
-            f"Google Sheets connection failed: {e}"
+        print(
+            f"[SHEETS ERROR] {str(e)}",
+            flush=True
         )
-
         return None
 
 
 # ============================================================
-# REQUEST MODEL
+# DATA MODEL
 # ============================================================
 
 class BookingPayload(BaseModel):
-
-    name: str = Field(
-        ...,
-        min_length=2,
-        description="Patient full name"
-    )
-
-    phone: str = Field(
-        ...,
-        min_length=10,
-        description="Patient phone number"
-    )
-
-    date: str = Field(
-        ...,
-        description="Appointment date in YYYY-MM-DD format"
-    )
-
-    time: str = Field(
-        ...,
-        description="Appointment time such as 10:00 AM"
-    )
+    name: str
+    phone: str
+    date: str
+    time: str
 
 
 # ============================================================
-# HEALTH CHECK
+# ROOT
 # ============================================================
 
 @app.get("/")
 async def root():
+
+    print("[HEALTH] Root endpoint called", flush=True)
 
     return {
         "status": "Backend server is running!",
@@ -250,14 +86,15 @@ async def root():
     }
 
 
+# ============================================================
+# HEALTH
+# ============================================================
+
 @app.get("/health")
 async def health():
 
-    sheet = get_google_sheet()
-
     return {
-        "status": "healthy",
-        "google_sheets": "connected" if sheet else "disconnected"
+        "status": "healthy"
     }
 
 
@@ -268,76 +105,55 @@ async def health():
 @app.post("/api/book-appointment")
 async def book_appointment(data: BookingPayload):
 
-    print("================================")
-    print("SARVAM BOOKING REQUEST RECEIVED")
-    print("Name:", data.name)
-    print("Phone:", data.phone)
-    print("Date:", data.date)
-    print("Time:", data.time)
-    print("================================")
-    
-    logger.info("======================================")
-    logger.info("BOOKING REQUEST RECEIVED")
-    logger.info(f"Name: {data.name}")
-    logger.info(f"Phone: {data.phone}")
-    logger.info(f"Date: {data.date}")
-    logger.info(f"Time: {data.time}")
-    logger.info("======================================")
+    print("\n========================================", flush=True)
+    print("🚨 BOOKING REQUEST RECEIVED", flush=True)
+    print("========================================", flush=True)
 
+    print(f"Name  : {data.name}", flush=True)
+    print(f"Phone : {data.phone}", flush=True)
+    print(f"Date  : {data.date}", flush=True)
+    print(f"Time  : {data.time}", flush=True)
 
-    # --------------------------------------------------------
-    # Validate date
-    # --------------------------------------------------------
+    print("========================================\n", flush=True)
 
-    try:
-
-        datetime.strptime(
-            data.date,
-            "%Y-%m-%d"
-        )
-
-    except ValueError:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid date format. Use YYYY-MM-DD."
-        )
-
-
-    # --------------------------------------------------------
-    # Get Google Sheet
-    # --------------------------------------------------------
 
     sheet = get_google_sheet()
 
     if not sheet:
 
-        logger.error(
-            "Google Sheets connection unavailable"
+        print(
+            "[ERROR] Google Sheets connection failed",
+            flush=True
         )
 
         raise HTTPException(
-            status_code=503,
-            detail="Appointment system temporarily unavailable."
+            status_code=500,
+            detail="Google Sheets connection failed"
         )
 
 
     try:
 
-        # ----------------------------------------------------
-        # Read existing appointments
-        # ----------------------------------------------------
+        # ====================================================
+        # READ EXISTING RECORDS
+        # ====================================================
+
+        print(
+            "[BOOKING] Reading existing appointments...",
+            flush=True
+        )
 
         records = sheet.get_all_records()
 
-        logger.info(
-            f"Existing appointments: {len(records)}"
+        print(
+            f"[BOOKING] Existing records: {len(records)}",
+            flush=True
         )
 
 
-        # ----------------------------------------------------
-        # Check duplicate slot
-        # ----------------------------------------------------
+        # ====================================================
+        # CHECK DOUBLE BOOKING
+        # ====================================================
 
         for row in records:
 
@@ -359,50 +175,52 @@ async def book_appointment(data: BookingPayload):
                 and existing_time == requested_time
             ):
 
-                logger.info(
-                    "Requested slot already booked"
+                print(
+                    "[BOOKING] SLOT ALREADY BOOKED",
+                    flush=True
                 )
 
                 return {
                     "success": False,
                     "booking_status": "slot_unavailable",
                     "message": (
-                        f"The slot on {data.date} "
-                        f"at {data.time} is already booked."
+                        f"Sorry, the slot on "
+                        f"{data.date} at {data.time} "
+                        f"is already booked."
                     )
                 }
 
 
-        # ----------------------------------------------------
-        # Generate token
-        # ----------------------------------------------------
+        # ====================================================
+        # TOKEN
+        # ====================================================
 
         same_day_bookings = [
 
             row
-
             for row in records
-
-            if str(
-                row.get("Date", "")
-            ).strip() == data.date.strip()
+            if str(row.get("Date", "")).strip()
+            == data.date.strip()
 
         ]
 
-
-        token_number = len(
-            same_day_bookings
-        ) + 1
+        token_number = len(same_day_bookings) + 1
 
 
-        logger.info(
-            f"Generated token: {token_number}"
+        print(
+            f"[BOOKING] Generated token: {token_number}",
+            flush=True
         )
 
 
-        # ----------------------------------------------------
-        # Add appointment to sheet
-        # ----------------------------------------------------
+        # ====================================================
+        # APPEND
+        # ====================================================
+
+        print(
+            "[BOOKING] Adding appointment to Google Sheet...",
+            flush=True
+        )
 
         sheet.append_row(
             [
@@ -411,19 +229,20 @@ async def book_appointment(data: BookingPayload):
                 data.name,
                 data.phone,
                 token_number,
-                "Confirmed"
+                "Confirmed",
             ]
         )
 
 
-        logger.info(
-            "Appointment successfully added to Google Sheet"
+        print(
+            "[BOOKING] Appointment successfully added!",
+            flush=True
         )
 
 
-        # ----------------------------------------------------
-        # Success response
-        # ----------------------------------------------------
+        # ====================================================
+        # RESPONSE
+        # ====================================================
 
         response = {
 
@@ -433,7 +252,9 @@ async def book_appointment(data: BookingPayload):
 
             "token_number": token_number,
 
-            "patient_name": data.name,
+            "name": data.name,
+
+            "phone": data.phone,
 
             "date": data.date,
 
@@ -443,30 +264,34 @@ async def book_appointment(data: BookingPayload):
                 f"Appointment successfully booked for "
                 f"{data.name} on {data.date} at "
                 f"{data.time}. "
-                f"Token number is {token_number}."
+                f"Your token number is "
+                f"{token_number}."
             )
         }
 
 
-        logger.info(
-            f"BOOKING SUCCESS: {response}"
+        print(
+            "[BOOKING] Returning successful response",
+            flush=True
         )
+
+        print(response, flush=True)
 
         return response
 
 
     except HTTPException:
-
         raise
 
 
     except Exception as e:
 
-        logger.exception(
-            f"Booking operation failed: {e}"
+        print(
+            f"[BOOKING ERROR] {str(e)}",
+            flush=True
         )
 
         raise HTTPException(
             status_code=500,
-            detail="Unable to complete appointment booking."
+            detail=str(e)
         )
