@@ -70,6 +70,14 @@ class BookingPayload(BaseModel):
     date: str
     time: str
 
+    @field_validator("phone", mode="before")
+    def coerce_phone_to_string(cls, v):
+        # Convert integers or floats from Sarvam to clean string
+        return str(v).strip()
+
+    @field_validator("name", "date", "time", mode="before")
+    def clean_strings(cls, v):
+        return str(v).strip() if v is not None else ""
 
 # ============================================================
 # ROOT
