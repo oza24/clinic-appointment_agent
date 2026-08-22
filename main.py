@@ -176,6 +176,11 @@ async def health():
 ## Get all appointments 
 #============================================================
 
+# ============================================================
+# GET ALL APPOINTMENTS (Cleaned Keys)
+# ============================================================
+
+
 @app.get("/api/appointments")
 async def get_appointments():
     sheet = get_google_sheet()
@@ -184,11 +189,37 @@ async def get_appointments():
             status_code=500, detail="Google Sheets connection failed"
         )
     try:
-        records = sheet.get_all_records()
-        return {"success": True, "data": records}
+        raw_records = sheet.get_all_records()
+
+        # Sanitize keys: strips whitespace and handles any header variations
+        cleaned_records = []
+        for row in raw_records:
+            cleaned_row = {}
+            for k, v in row.items():
+                clean_key = str(k).strip()
+                clean_val = str(v).strip() if v is not None else ""
+
+                # Standardize keys for the frontend
+                if clean_key in ["Patient Name", "Name", "Patient Name "]:
+                    cleaned_row["name"] = clean_val
+                elif clean_key in ["Phone Number", "Phone", "Phone Number "]:
+                    cleaned_row["phone"] = clean_val
+                elif clean_key in ["Token Number", "Token", "Token Number "]:
+                    cleaned_row["token"] = clean_val
+                elif clean_key in ["Date", "Date "]:
+                    cleaned_row["date"] = clean_val
+                elif clean_key in ["Time", "Time "]:
+                    cleaned_row["time"] = clean_val
+                elif clean_key in ["Status", "Status "]:
+                    cleaned_row["status"] = clean_val
+                else:
+                    cleaned_row[clean_key.lower()] = clean_val
+
+            cleaned_records.append(cleaned_row)
+
+        return {"success": True, "data": cleaned_records}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
     
 # ============================================================
 # BOOK APPOINTMENT
